@@ -23,11 +23,23 @@ It does four jobs:
 | `prime.ts` | Prime Agent entrypoint. Uses `PRIME_AGENT_CODING_AGENT_DIR` / `~/.prime/agent`. |
 | `telemetry.ts` | Gateway telemetry parsing for headers, JSON bodies, and final streaming SSE usage. Never invents tok/s from latency. |
 | `test/shared.test.ts` | Shared extension tests. |
+| `test/catalog-sync.test.ts` | HTTP-to-scratch-catalog integration proof: configured/canonical query, chat filtering, metadata, preservation on unusable responses. |
+| `test/thinking-sync.test.ts` | HTTP sync proof: effective controls override legacy maps for a new provider; explicit maps survive repeat sync; generic tiers do not invent controls. |
+| `scripts/verify-local-thinking.mjs` | Installation-specific proof using Pi 1.2.0's real extension loader and adapter, plus OmniRoute 3.8.51 source and server bundle caps. |
+| `scripts/verify-live-thinking.py` | One short live Codex max request (optional model argument); verifies requested/upstream effort in the call log. Uses inference quota. |
+| `scripts/verify-local-kiro-thinking.mjs` | Real Pi loader/sync/adapter plus installed Kiro translator: 5.5 effort fields, tool history, sampling removal, Sonnet output cap, compiled gates. |
+| `scripts/verify-live-kiro-thinking.py` | Four short quota-consuming Kiro 5.5 requests at xhigh/max; confirms same-model HTTP 200 without inventing effort telemetry. |
+| `scripts/verify-universal-thinking.mjs` | Real Pi loader/sync/picker/request proof across providers, fixed aliases, budget controls, and unknown/dynamic routes; no inference. |
+| `scripts/verify-live-universal-thinking.mjs` | Actual local catalog and Pi sync proof; scratch by default, `--sync` backs up and refreshes the real models.json. No inference. |
+| `docs/universal-thinking-plan.md` | Effective server-control contract and verification acceptance conditions. |
+| `docs/fork-snapshot-2026-10-14.md` | Fork branches, source baselines, published scope, and local verification limits. |
+| `docs/thinking-controls-2026-10-14.md` | Local patch details, verification results, activation, and update limitations. |
 | `test/telemetry.test.ts` | Telemetry parser and streaming capture tests. |
 | `README.md` | User-facing install/setup/usage docs. |
 | `ARCHITECTURE.md` | Data flow and routing docs. |
 | `AGENTS.md` | Mandatory instructions for AI agents editing this repo. |
 | `CONTRIBUTING.md` | Dev workflow and contribution rules. |
+| `docs/contribution-plan-model-sync.md` | Configured/canonical catalog contribution plan and separate future capability-aware thinking work. |
 | `package.json` | Package metadata, host manifests, scripts. |
 
 ## Key concepts
@@ -69,13 +81,15 @@ Read in this order:
 
 1. `createOmniExtension()` — entrypoint used by `pi.ts`, `omp.ts`, and `prime.ts`.
 2. `runSetup()` — setup flow, health probe, provider registration, config save.
-3. `fetchSyncedModels()` — fetches `/v1/models`, filters chat-capable models, maps metadata and pricing.
+3. `fetchSyncedModels()` — requests `/v1/models?configuredOnly=true&prefix=canonical`, rejects invalid/empty/chat-less catalogs before registration/persistence, filters explicit non-chat types and raw non-chat output, maps metadata and pricing. Unknown output metadata stays eligible; user globs run afterward in `discoverModels()`.
 4. `normalizeCost()` — maps OmniRoute `pricing` into host model `cost`.
 5. `discoverModels()` — combines auto models with synced models.
 6. `buildProviderModelConfig()` — converts a synced model into host provider config.
 7. `persistModelsJson()` — updates only `providers[providerName]` in `models.json`.
 8. `reloadProviderFromModelsJson()` — loads saved catalog and normalizes legacy API identifiers.
 9. `checkHealth()` / `isOmniRouteReachableHttpStatus()` — treat HTTP `< 500` as reachable.
+
+`normalizeThinkingLevelMap()` validates wire mappings. Sync prefers effective `capabilities.thinking_controls.level_map`, then the legacy catalog map, then a saved same-ID map. Do not add a provider/model list in the extension or infer controls from generic `effort_tiers`. Route differences are resolved by OmniRoute. Unknown/dynamic routes keep conservative legacy host choices.
 
 ## Catalog autosync
 

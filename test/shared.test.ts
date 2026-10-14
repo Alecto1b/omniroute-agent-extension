@@ -190,7 +190,7 @@ test("maps OmniRoute per-model pricing into Pi model cost during sync", async ()
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (input: any) => {
     const url = String(input);
-    if (url.endsWith("/v1/models")) {
+    if (new URL(url).pathname === "/v1/models") {
       return new Response(
         JSON.stringify({
           object: "list",
@@ -290,7 +290,7 @@ test("autosync command uses minutes and defaults repeat sync off", async () => {
   };
 
   globalThis.fetch = (async (input: any) => {
-    if (String(input).endsWith("/v1/models")) {
+    if (new URL(String(input)).pathname === "/v1/models") {
       modelsCalls++;
       return new Response(
         JSON.stringify({
@@ -368,7 +368,7 @@ test("filters synced models with include and exclude globs while preserving auto
   const registrations: any[] = [];
   try {
     globalThis.fetch = (async (input: any) => {
-      if (String(input).endsWith("/v1/models")) {
+      if (new URL(String(input)).pathname === "/v1/models") {
         return new Response(JSON.stringify({
           data: [
             { id: "openai/gpt-5", name: "GPT 5", owned_by: "openai", input_modalities: ["text"] },
@@ -412,7 +412,7 @@ test("provider config advertises OmniRoute cache and session affinity compat def
   const registrations: any[] = [];
   try {
     globalThis.fetch = (async (input: any) => {
-      if (String(input).endsWith("/v1/models")) {
+      if (new URL(String(input)).pathname === "/v1/models") {
         return new Response(JSON.stringify({ data: [{ id: "openai/gpt-5", name: "GPT 5", input_modalities: ["text"] }] }), { status: 200, headers: { "content-type": "application/json" } });
       }
       throw new Error(`unexpected fetch ${input}`);
@@ -477,7 +477,7 @@ test("does not send literal command-backed api keys unless command resolution is
   try {
     globalThis.fetch = (async (_input: any, init?: any) => {
       authHeaders.push(init?.headers?.Authorization ?? init?.headers?.authorization ?? "");
-      return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify({ data: [{ id: "openai/chat" }] }), { status: 200, headers: { "content-type": "application/json" } });
     }) as typeof fetch;
     const pi = { registerProvider() {}, registerTool() {}, registerCommand() {}, on() {} };
     process.env.COMMAND_KEY_DISABLED_HOME = agentHome;
@@ -502,7 +502,7 @@ test("resolves command-backed api keys only when explicitly enabled", async () =
   try {
     globalThis.fetch = (async (_input: any, init?: any) => {
       authHeaders.push(init?.headers?.Authorization ?? init?.headers?.authorization ?? "");
-      return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify({ data: [{ id: "openai/chat" }] }), { status: 200, headers: { "content-type": "application/json" } });
     }) as typeof fetch;
     const pi = { registerProvider() {}, registerTool() {}, registerCommand() {}, on() {} };
     process.env.COMMAND_KEY_ENABLED_HOME = agentHome;
@@ -529,7 +529,7 @@ test("resolves api keys from apiKeyEnv and dollar-prefixed env references", asyn
     process.env.OMNIROUTE_TEST_KEY_TWO = "env-two";
     globalThis.fetch = (async (_input: any, init?: any) => {
       authHeaders.push(init?.headers?.Authorization ?? init?.headers?.authorization ?? "");
-      return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify({ data: [{ id: "openai/chat" }] }), { status: 200, headers: { "content-type": "application/json" } });
     }) as typeof fetch;
     const pi = { registerProvider() {}, registerTool() {}, registerCommand() {}, on() {} };
     await createOmniExtension(pi as any, { homeEnvVar: "ENV_KEY_HOME", defaultHome: agentHome });

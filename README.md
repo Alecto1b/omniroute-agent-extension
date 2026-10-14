@@ -77,7 +77,7 @@ Synced models are written to `~/.omp/agent/models.json`, `~/.pi/agent/models.jso
 |---|---|
 | `/omni` | Server health and provider status |
 | `/omni setup` | Configure server URL and API key interactively |
-| `/omni sync` | Fetch `/v1/models` and register models in the picker |
+| `/omni sync` | Fetch the configured canonical `/v1/models` catalog and register chat models in the picker |
 | `/omni models [search]` | Browse synced models with optional keyword filter |
 | `/omni log [lines]` | Show recent connection log entries from `connection.log` |
 | `/omni test <model>` | Smoke-test `/v1/chat/completions` with a specific model |
@@ -147,7 +147,11 @@ By default, an `apiKey` starting with `!` is not executed and is not sent litera
 
 ## Model filters
 
-OmniRoute can advertise hundreds of models, including models for providers you have not connected. You can keep the model picker usable with include and exclude globs. Filters apply during `/omni sync` and startup sync. They use only `/v1/models`, so a normal OmniRoute inference API key is enough. No management or admin token is required.
+All catalog sync paths (manual, startup, autosync, and tool) request `/v1/models?configuredOnly=true&prefix=canonical` to prefer configured providers and avoid duplicate prefix aliases. This uses the inference API key; no management or admin token is required. Older servers may ignore these query parameters. A request error does not trigger a fallback to the full catalog.
+
+Being listed is not proof of account access or successful inference: the filtered catalog may still include public or dynamic routes. Chat-capable `auto/*`, `no-think/*`, and thinking/speed variants remain eligible; the extension does not hardcode a provider allowlist. Explicit image, video, audio, classifier, and embedding types, and output consisting only of image/video/audio, are excluded. Text-output multimodal models and models with missing or unknown output metadata remain eligible.
+
+Invalid, empty, or chat-less server catalogs stop sync without replacing the saved or registered catalog, even if a deployment intentionally offers no chat models. Explicit user filters may still remove all models; the guard applies before those filters. Use include and exclude globs to narrow the picker further. Filters apply on every sync path.
 
 Config example:
 
@@ -167,6 +171,20 @@ OMNIROUTE_EXCLUDE_MODELS="*/deprecated*,*/free-trial*"
 
 Built-in `auto` routing models stay visible by default unless an exclude pattern matches them.
 
+### Thinking controls
+
+`/omni sync` automatically converts OmniRoute's `capabilities.thinking_controls.level_map` into the host's `thinkingLevelMap`. This works for every provider that publishes effective controls, including newly added models, without a client model allowlist. Reload Pi with `/reload`, switch with `/model`, then open `/thinking`.
+
+Effective controls take precedence over legacy catalog `thinkingLevelMap` entries and saved mappings. Older catalogs remain compatible: explicit maps are copied, and saved maps for the same ID are retained when the server supplies no map. A legacy override can contain:
+
+```json
+"thinkingLevelMap": { "xhigh": "xhigh", "max": "max" }
+```
+
+Unsupported levels are `null`. The extension does not convert generic `effort_tiers`: advertised tiers can share the same upstream budget or be restricted by an adapter. The server distinguishes native efforts, numeric budget presets, fixed aliases, and unknown capabilities. Unknown and automatic routes keep legacy host choices until an effective contract exists. Controls do not prove account access or bypass model caps.
+
+The local OmniRoute patch publishes controls for Codex models including Astra, Sol, and Luna, and the documented Kiro adaptive profiles. Astra and Kiro Opus/Sonnet 5.5 offer `xhigh` and `max`; Kiro Opus/Sonnet 4.6 offer `max` without `xhigh`. The current Gemini adapter converts `xhigh`/`max` into its `high` budget, so these aliases do not appear as extra levels. Codex `ultra` uses upstream `max`, and Pi's picker ends at `max`. Package updates can replace local patches. Details and verification are in `docs/thinking-controls-2026-10-14.md`.
+
 ## Agent Tools
 
 Two tools the LLM can call directly:
@@ -176,7 +194,7 @@ Two tools the LLM can call directly:
 
 ## How It Works
 
-The extension registers OmniRoute as an `openai-completions` provider. After `/omni sync`, all models appear in the picker. Every request is handled natively by the host's built-in `openai-completions` handler — real SSE streaming, native `tool_calls`, no middleware.
+The extension registers OmniRoute as an `openai-completions` provider. After `/omni sync`, eligible chat models appear in the picker. Every request is handled natively by the host's built-in `openai-completions` handler — real SSE streaming, native `tool_calls`, no middleware.
 
 ```text
 agent

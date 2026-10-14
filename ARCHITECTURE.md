@@ -45,15 +45,24 @@ Saved provider shape:
 
 ```text
 /omni sync
-  -> GET {OMNI_URL}/v1/models
-  -> filter non-chat/image-only models
+  -> GET {OMNI_URL}/v1/models?configuredOnly=true&prefix=canonical
+  -> reject invalid or empty data before provider registration/persistence
+  -> filter explicit non-chat types and raw image/video/audio-only output
+  -> reject a catalog with no chat models before applying user include/exclude globs
   -> normalize input modalities
   -> copy context/max token/reasoning metadata
+  -> copy effective thinking_controls.level_map, legacy catalog map, or saved same-ID map
   -> map OmniRoute pricing into host model cost
   -> write config.providers.omni.models
   -> refresh host model registry
   -> re-register omni provider
 ```
+
+All hosts and sync entrypoints use `fetchSyncedModels()` through `discoverModels()`. The guard runs before built-in auto models are prepended, so they cannot mask an empty server catalog. Unusable catalogs throw through the existing error flow and leave saved and registered models unchanged. User filters may intentionally produce an empty selection after validation.
+
+Missing or unknown output metadata remains compatible; output with text remains eligible for multimodal chat. Valid route/effort variants are not deduplicated by suffix or provider assumptions. Server configured-only/canonical filtering is not an inference-access check. Older servers may ignore the parameters; request errors never fall back to the full catalog.
+
+`normalizeThinkingLevelMap()` retains only host thinking-level keys with string wire values or `null` (unsupported). `fetchSyncedModels()` prefers `capabilities.thinking_controls.level_map`, then a legacy catalog `thinkingLevelMap`, then a saved same-ID map. Generic effort arrays do not establish effective controls. `buildProviderModelConfig()` carries the mapping through registration and persistence. The extension has no provider/model list for thinking and does not rewrite inference requests. The installed OmniRoute resolver shares Codex wire caps and Kiro profile data with adapters; it publishes native/budget/fixed maps and leaves unknown/dynamic choices to legacy host behavior. Server implementation details are in `docs/thinking-controls-2026-10-14.md`.
 
 Pricing map:
 
@@ -98,6 +107,8 @@ const PROVIDER_API = "openai-completions";
 ```
 
 The extension does not proxy or rewrite chat requests. The host sends requests directly to OmniRoute, so native SSE streaming and native `tool_calls` stay intact.
+
+Local installed-server fixes are recorded separately in `docs/thinking-controls-2026-10-14.md`. For Kiro Opus/Sonnet 5.5, Pi emits `reasoning_effort`; the patched OmniRoute translator builds `additionalModelRequestFields.output_config.effort` with adaptive thinking, and the Kiro executor preserves that envelope. Kiro Sonnet 5.5 output is capped at 64k on that route. These changes live in the installed OmniRoute source/bundle, not in the extension's HTTP routing.
 
 ## Gateway telemetry
 

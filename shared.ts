@@ -52,7 +52,8 @@ interface OmniApiModel {
 	max_output_tokens?: number;
 	max_tokens?: number;
 	reasoning?: boolean;
-	capabilities?: { reasoning?: boolean; thinking?: boolean };
+	thinkingLevelMap?: Record<string, string | null>;
+	capabilities?: { reasoning?: boolean; thinking?: boolean; thinking_controls?: { level_map?: unknown; kind?: string } };
 	input_modalities?: unknown;
 	input?: unknown;
 	output_modalities?: unknown;
@@ -70,6 +71,7 @@ type SyncedModel = {
 	contextWindow?: number;
 	maxTokens?: number;
 	reasoning?: boolean;
+	thinkingLevelMap?: Record<string, string | null>;
 	input?: string[];
 	cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
 };
@@ -79,6 +81,7 @@ type ProviderModelConfig = {
 	name: string;
 	api: string;
 	reasoning: boolean;
+	thinkingLevelMap?: Record<string, string | null>;
 	input: string[];
 	cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
 	contextWindow: number;
@@ -425,9 +428,13 @@ function normalizeCost(pricing: OmniApiModel["pricing"]): SyncedModel["cost"] | 
 }
 
 function isPiChatModel(model: OmniApiModel): boolean {
-	const output = normalizeModalities(model.output_modalities ?? model.output);
-	if (String(model.type || "chat").toLowerCase() === "image") return false;
-	return output.length === 0 || output.includes("text");
+	if (["image", "video", "audio", "classifier", "embedding"].includes(String(model.type || "chat").trim().toLowerCase())) return false;
+	// Inspect raw output: input normalization drops video/audio. Missing or
+	// unknown output metadata alone is not evidence that a model cannot chat.
+	const rawOutput = model.output_modalities ?? model.output;
+	if (!Array.isArray(rawOutput) || rawOutput.length === 0) return true;
+	const output = rawOutput.map((item) => String(item).trim().toLowerCase());
+	return !output.every((item) => ["image", "video", "audio"].includes(item));
 }
 
 function upsertSyncedModel(models: SyncedModel[], next: SyncedModel): void {
@@ -456,14 +463,29 @@ function sortKey(id: string): string {
 }
 
 // ─── Sync + persistence ───────────────────────────────────────────────────────
+/** Only explicit wire mappings describe host controls; generic effort tiers may be aliases. */
+function normalizeThinkingLevelMap(value: unknown): Record<string, string | null> | undefined {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+	const result: Record<string, string | null> = {};
+	for (const level of ["off", "minimal", "low", "medium", "high", "xhigh", "max"]) {
+		const mapped = (value as Record<string, unknown>)[level];
+		if (mapped === null || (typeof mapped === "string" && mapped.trim())) result[level] = mapped;
+	}
+	return Object.keys(result).length ? result : undefined;
+}
+
 async function fetchSyncedModels(config: OmniConfig, agentHome?: string): Promise<SyncedModel[]> {
-	const data = await requestJson(config, "/v1/models", {}, 10_000, agentHome);
-	const rawModels: any[] = Array.isArray(data?.data) ? data.data : [];
+	const data = await requestJson(config, "/v1/models?configuredOnly=true&prefix=canonical", {}, 10_000, agentHome);
+	if (!Array.isArray(data?.data)) throw new Error("OmniRoute catalog is invalid: expected a data array; existing models unchanged.");
+	if (data.data.length === 0) throw new Error("OmniRoute catalog is empty; existing models unchanged.");
+	const rawModels: any[] = data.data;
 	const results: SyncedModel[] = [];
+	const saved = agentHome ? readModelsJson(agentHome)?.providers?.[config.providerName]?.models : undefined;
+	const savedMaps = new Map<string, unknown>(Array.isArray(saved) ? saved.map((m: any) => [m.id, m.thinkingLevelMap]) : []);
 
 	for (const m of rawModels) {
 		const id = typeof m === "string" ? m : m?.id;
-		if (!id || !isPiChatModel(m)) continue;
+		if (typeof id !== "string" || !id.trim() || !isPiChatModel(m)) continue;
 
 		const synced: SyncedModel = { id, name: m.name ?? id, owned_by: m.owned_by };
 
@@ -477,12 +499,17 @@ async function fetchSyncedModels(config: OmniConfig, agentHome?: string): Promis
 		if (maxTokens) synced.maxTokens = maxTokens;
 
 		if (m.reasoning || m.capabilities?.reasoning || m.capabilities?.thinking) synced.reasoning = true;
+		const thinkingLevelMap = normalizeThinkingLevelMap(m.capabilities?.thinking_controls?.level_map) ??
+			normalizeThinkingLevelMap(m.thinkingLevelMap) ?? normalizeThinkingLevelMap(savedMaps.get(id));
+		if (thinkingLevelMap) synced.thinkingLevelMap = thinkingLevelMap;
 
 		const cost = normalizeCost(m.pricing);
 		if (cost) synced.cost = cost;
 
 		upsertSyncedModel(results, synced);
 	}
+
+	if (results.length === 0) throw new Error("OmniRoute catalog contains no chat models; existing models unchanged.");
 
 	return results
 		.sort((a, b) => {
@@ -500,6 +527,7 @@ function buildProviderModelConfig(m: SyncedModel): ProviderModelConfig {
 		name: m.name,
 		api: PROVIDER_API,
 		reasoning: m.reasoning ?? false,
+		...(m.thinkingLevelMap ? { thinkingLevelMap: m.thinkingLevelMap } : {}),
 		input: m.input ?? ["text"],
 		cost: m.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: m.contextWindow ?? 128_000,
