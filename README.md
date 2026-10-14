@@ -1,5 +1,11 @@
 # OmniRoute Pi Extension
 
+This fork snapshots the installed 2.0.1 prompt-tool extension on top of `40c0218`. It includes earlier local prompt-protocol/parser adjustments alongside configured catalog sync and automatic thinking controls. It is separate from the native multi-host 3.2.3 branch; review those earlier adjustments before proposing an upstream PR.
+
+`/omni sync` requests configured canonical chat models and preserves the existing list on invalid, empty, or chat-less responses. Effective `capabilities.thinking_controls.level_map` becomes Pi's `thinkingLevelMap`, with legacy catalog and saved same-ID mappings as fallbacks. The extension has no thinking model allowlist. Reload Pi, select `/model`, then `/thinking`; levels follow effective route metadata.
+
+This source passes the real Pi 1.2.0 loader, repeat scratch HTTP sync, picker, and outgoing effort checks. Direct static typecheck/import against Pi 1.2.0 has inherited compatibility errors involving `getApiProvider` and `StopReason` narrowing; those checks are not claimed to pass. Personal models.json, API keys, and runtime logs are excluded.
+
 [![npm version](https://img.shields.io/npm/v/omniroute-pi-ext-integration.svg?style=flat-square)](https://www.npmjs.com/package/omniroute-pi-ext-integration)
 [![npm downloads](https://img.shields.io/npm/dm/omniroute-pi-ext-integration.svg?style=flat-square)](https://www.npmjs.com/package/omniroute-pi-ext-integration)
 
@@ -96,7 +102,7 @@ The model is taught this wire format as a standalone assistant message:
 </tool_call>
 ```
 
-Prompt tool mode only executes tool calls when the entire assistant message is one or more `<tool_call>` blocks plus whitespace. If the model includes prose, examples, or any extra text alongside `<tool_call>`, the extension treats the whole response as normal text and does not execute tools. This prevents accidental tool calls from documentation snippets or mixed explanatory answers.
+In this installed snapshot, prompt mode parses `<tool_call>` blocks within assistant text and preserves surrounding prose. This retains the earlier local parser customization and differs from upstream `40c0218`, which requires standalone tool-call messages. Review that behavior separately before carrying this snapshot into an upstream contribution.
 
 Tool results are fed back in history as text:
 

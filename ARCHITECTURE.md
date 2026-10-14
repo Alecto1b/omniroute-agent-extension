@@ -1,5 +1,9 @@
 # Architecture
 
+## Fork snapshot: catalog and thinking metadata
+
+The installed 2.0.1 source is preserved separately from the shared extension. Sync uses `/v1/models?configuredOnly=true&prefix=canonical`, filters non-chat rows, and rejects unusable catalogs before persistence. `normalizeThinkingLevelMap()` validates host keys and wire values. Effective `capabilities.thinking_controls.level_map` takes precedence over legacy catalog maps and saved same-ID maps; registration retains it. Provider-specific reasoning differences remain in OmniRoute. The snapshot also preserves prompt-protocol/parser adjustments predating this thinking work.
+
 ## Overview
 
 This extension is a single-file Pi extension (`index.ts`) that integrates OmniRoute with Pi Coding Agent.

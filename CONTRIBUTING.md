@@ -72,6 +72,8 @@ If changing function names or scan paths, update `AI.md` so future AI agents do 
 
 ## Testing Checklist
 
+This installed-source snapshot is verified through Pi's actual loader. From the separate multi-host checkout, use `OMNI_EXTENSION_PATH=/absolute/path/to/this/index.ts node scripts/verify-universal-thinking.mjs`; the fixture uses scratch config, repeat HTTP sync, and intercepted requests without inference. Direct typecheck/import failures against Pi 1.2.0 remain compatibility limitations rather than passing checks. Personal models.json does not belong in a commit.
+
 For model sync changes:
 
 - `/omni setup` saves URL/API key.

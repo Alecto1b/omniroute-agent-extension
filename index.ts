@@ -151,6 +151,7 @@ type SyncedModel = {
 	contextWindow?: number;
 	maxTokens?: number;
 	reasoning?: boolean;
+	thinkingLevelMap?: Record<string, string | null>;
 	input?: string[];
 	api?: string;
 	tool_calling?: boolean;
@@ -173,9 +174,13 @@ function normalizeModalities(value: unknown): string[] {
 /** Filter out image-generation/non-chat models so Ctrl+P only shows usable chat models. */
 function isPiChatModel(model: any): boolean {
 	if (!model || typeof model !== "object") return true;
-	const output = normalizeModalities(model.output_modalities ?? model.output);
-	if (String(model.type || "chat").toLowerCase() === "image") return false;
-	return output.length === 0 || output.includes("text");
+	const type = String(model.type || "chat").toLowerCase();
+	if (["image", "video", "audio", "classifier", "embedding"].includes(type)) return false;
+	const output = model.output_modalities ?? model.output;
+	if (!Array.isArray(output) || output.length === 0) return true;
+	return output.some((item: unknown) =>
+		typeof item === "string" && item.trim().toLowerCase() === "text"
+	);
 }
 
 /** Detect web-synced models whose native function calling is unreliable/missing. */
@@ -221,10 +226,10 @@ function renderToolProtocol(tools: Tool[]): string {
 		"# Tool calling protocol",
 		"",
 		"You are connected to Pi through a chat-only adapter. Native/internal tool calling is NOT available.",
-		"The only valid way to call tools is to write literal text <tool_call> blocks as a complete standalone assistant message.",
+		"The only valid way to call tools is to write literal text <tool_call> blocks in your assistant message.",
 		"Do not use any built-in, hidden, XML, function-call, or provider-specific tool-call channel.",
-		"If you need a tool, your ENTIRE assistant message must contain only one or more",
-		"tool-call blocks in EXACTLY this format, with no prose, explanation, markdown fences, or extra text:",
+		"If you need a tool, write any reasoning first, then end your message with one or more",
+		"tool-call blocks in EXACTLY this format:",
 		"",
 		"<tool_call>",
 		'{"name": "<tool_name>", "arguments": { ... }}',
@@ -232,9 +237,6 @@ function renderToolProtocol(tools: Tool[]): string {
 		"",
 		"Rules:",
 		"- Use ONLY the <tool_call> text-block protocol shown here for tool calls.",
-		"- A tool-call message is valid only when the whole assistant message is <tool_call> block(s) plus whitespace.",
-		"- Do not include reasoning, comments, examples, or normal answer text in the same message as <tool_call>.",
-		"- Text that contains <tool_call> alongside any extra prose is treated as normal text and will NOT execute tools.",
 		"- Whenever you decide a tool is needed, prefer this Pi coding-agent <tool_call> procedure over any chat/internal tool-calling mechanism.",
 		"- Do not use chat/internal tool calling unless the user explicitly asks for it or the Pi coding-agent <tool_call> procedure cannot perform the requested action.",
 		"- The JSON must be valid and `arguments` must match the tool's parameter schema.",
@@ -340,7 +342,7 @@ function coerceArguments(value: unknown): Record<string, any> {
 	return {};
 }
 
-/** Parse standalone <tool_call> messages and preserve parse errors as model-visible feedback. */
+/** Parse <tool_call> blocks from model text and preserve parse errors as model-visible feedback. */
 function parseToolCalls(text: string): {
 	prose: string;
 	calls: { name: string; arguments: Record<string, any> }[];
@@ -348,16 +350,6 @@ function parseToolCalls(text: string): {
 } {
 	const calls: { name: string; arguments: Record<string, any> }[] = [];
 	const errors: string[] = [];
-	const original = text.trim();
-	if (!original) return { prose: "", calls, errors };
-
-	TOOL_CALL_RE.lastIndex = 0;
-	const remainder = text.replace(TOOL_CALL_RE, "").trim();
-	if (remainder) {
-		// Safety: examples or accidental <tool_call> snippets in prose must not execute.
-		return { prose: original, calls: [], errors: [] };
-	}
-
 	let match: RegExpExecArray | null;
 	TOOL_CALL_RE.lastIndex = 0;
 	while ((match = TOOL_CALL_RE.exec(text)) !== null) {
@@ -373,9 +365,7 @@ function parseToolCalls(text: string): {
 			errors.push(`invalid JSON in <tool_call> (${e instanceof Error ? e.message : "parse error"}): ${body.slice(0, 200)}`);
 		}
 	}
-
-	if (calls.length === 0 && errors.length === 0) return { prose: original, calls, errors };
-	return { prose: "", calls, errors };
+	return { prose: text.replace(TOOL_CALL_RE, "").trim(), calls, errors };
 }
 
 /**
@@ -518,11 +508,27 @@ function upsertSyncedModel(models: SyncedModel[], next: SyncedModel): void {
 	};
 }
 
+/** Consume effective server controls; generic advertised tiers can be aliases. */
+function normalizeThinkingLevelMap(value: unknown): Record<string, string | null> | undefined {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+	const result: Record<string, string | null> = {};
+	for (const level of ["off", "minimal", "low", "medium", "high", "xhigh", "max"]) {
+		const mapped = (value as Record<string, unknown>)[level];
+		if (mapped === null || (typeof mapped === "string" && mapped.trim())) result[level] = mapped;
+	}
+	return Object.keys(result).length ? result : undefined;
+}
+
 /** Fetch OmniRoute /v1/models and convert rows into Pi models.json entries. */
 async function getAllModelsFromOmniRoute(): Promise<SyncedModel[]> {
 	const results: SyncedModel[] = [];
-	const data = await api("/v1/models");
-	const models = data?.data || [];
+	const data = await api("/v1/models?configuredOnly=true&prefix=canonical");
+	if (!Array.isArray(data?.data) || data.data.length === 0) {
+		throw new Error("OmniRoute returned an empty or invalid model catalog; keeping the current model list.");
+	}
+	const models = data.data;
+	const saved = readModelsJson()?.providers?.omni?.models;
+	const savedMaps = new Map<string, unknown>(Array.isArray(saved) ? saved.map((m: any) => [m.id, m.thinkingLevelMap]) : []);
 
 	for (const m of models) {
 		const id = typeof m === "string" ? m : m.id;
@@ -547,8 +553,15 @@ async function getAllModelsFromOmniRoute(): Promise<SyncedModel[]> {
 		if (maxTokens) synced.maxTokens = maxTokens;
 
 		if (m.capabilities?.reasoning || m.capabilities?.thinking) synced.reasoning = true;
+      const thinkingLevelMap = normalizeThinkingLevelMap(m.capabilities?.thinking_controls?.level_map) ??
+        normalizeThinkingLevelMap(m.thinkingLevelMap) ?? normalizeThinkingLevelMap(savedMaps.get(id));
+		if (thinkingLevelMap) synced.thinkingLevelMap = thinkingLevelMap;
 
 		upsertSyncedModel(results, synced);
+	}
+
+	if (results.length === 0) {
+		throw new Error("OmniRoute returned no chat models; keeping the current model list.");
 	}
 
 	return results

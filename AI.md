@@ -190,6 +190,8 @@ import ok
 
 ## Current Branch Intent
 
+Fork branch `fix/pi-2.0.1-installed-snapshot` preserves the active local 2.0.1 source, based on `40c0218`. It includes configured catalog protection and automatic controls in `getAllModelsFromOmniRoute()` via `normalizeThinkingLevelMap()`, plus earlier local prompt-tool customizations. Multi-host work lives on `fix/configured-model-sync`. Runtime verification uses the actual Pi loader and scratch config; direct Pi 1.2.0 static/import compatibility limits are documented in README.
+
 Branch `prompt-tools-web-fallback` adds prompt-emulated tool calling inside the existing OmniRoute extension.
 
 Goal: no UX change for user. `/model` works same; extension chooses tool mode internally.
